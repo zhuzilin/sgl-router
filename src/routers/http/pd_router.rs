@@ -38,9 +38,9 @@ use crate::{
         rerank::RerankRequest,
     },
     routers::{
-        error,
+        error, header_utils,
         route_utils::{error_type_from_status, route_to_endpoint},
-        header_utils, RouterTrait,
+        RouterTrait,
     },
 };
 

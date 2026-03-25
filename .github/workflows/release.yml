@@ -40,7 +40,7 @@ jobs:
           target: ${{ matrix.target }}
           args: --release --out dist
           manylinux: 2_28
-          manifest-path: bindings/python/Cargo.toml
+          working-directory: bindings/python
           before-script-linux: |
             dnf install -y openssl-devel
             ARCH=$(uname -m)
@@ -51,7 +51,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.artifact }}
-          path: dist/*.whl
+          path: bindings/python/dist/*.whl
 
   release:
     needs: build-wheels

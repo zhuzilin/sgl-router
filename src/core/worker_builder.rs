@@ -389,10 +389,7 @@ mod tests {
                 bootstrap_port: None
             }
         );
-        assert_eq!(
-            worker.connection_mode(),
-            &ConnectionMode::Http
-        );
+        assert_eq!(worker.connection_mode(), &ConnectionMode::Http);
         assert_eq!(worker.metadata().labels, labels);
         assert_eq!(
             worker.metadata().health_config.endpoint,
@@ -493,5 +490,4 @@ mod tests {
             health_config.success_threshold
         );
     }
-
 }

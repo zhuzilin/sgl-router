@@ -66,10 +66,7 @@ impl StepExecutor<LocalWorkerWorkflowData> for DetectConnectionModeStep {
             Err(http_err) => {
                 return Err(WorkflowError::StepFailed {
                     step_id: StepId::new("detect_connection_mode"),
-                    message: format!(
-                        "HTTP health check failed for {}: {}",
-                        config.url, http_err
-                    ),
+                    message: format!("HTTP health check failed for {}: {}", config.url, http_err),
                 });
             }
         };

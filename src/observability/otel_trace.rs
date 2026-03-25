@@ -104,7 +104,7 @@ pub fn otel_tracing_init(enable: bool, otlp_endpoint: Option<&str>) -> Result<()
 
     let exporter = opentelemetry_otlp::SpanExporter::builder()
         .with_http()
-        .with_endpoint(&format!("{}/v1/traces", endpoint))
+        .with_endpoint(format!("{}/v1/traces", endpoint))
         .with_protocol(opentelemetry_otlp::Protocol::HttpBinary)
         .build()
         .map_err(|e| {

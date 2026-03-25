@@ -600,9 +600,7 @@ impl ConfigValidator {
                 });
             }
 
-            if !url.starts_with("http://")
-                && !url.starts_with("https://")
-            {
+            if !url.starts_with("http://") && !url.starts_with("https://") {
                 return Err(ConfigError::InvalidValue {
                     field: "worker_url".to_string(),
                     value: url.clone(),
@@ -963,5 +961,4 @@ mod tests {
         // Should pass validation even with empty URLs
         assert!(ConfigValidator::validate(&config).is_ok());
     }
-
 }
