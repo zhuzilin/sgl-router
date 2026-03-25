@@ -41,7 +41,7 @@ jobs:
           args: --release --out dist --features vendored-openssl
           manylinux: auto
           manifest-path: bindings/python/Cargo.toml
-          before-script-linux: yum install -y perl-core || true
+          before-script-linux: yum install -y perl-core protobuf-compiler protobuf-devel || apk add --no-cache perl protobuf-dev || true
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
