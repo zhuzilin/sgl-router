@@ -93,11 +93,12 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
           args: --release --out dist --features vendored-openssl
-          manylinux: auto
+          manylinux: 2_28
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
-            yum install -y perl-core || apk add --no-cache perl || true
-            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
+            dnf install -y perl-IPC-Cmd perl-FindBin perl-File-Compare perl-File-Copy unzip
+            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip
+            unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
       - name: Install and verify wheel
         run: |
@@ -121,11 +122,12 @@ jobs:
         with:
           target: x86_64-unknown-linux-gnu
           args: --release --out dist --features vendored-openssl
-          manylinux: auto
+          manylinux: 2_28
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
-            yum install -y perl-core || apk add --no-cache perl || true
-            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
+            dnf install -y perl-IPC-Cmd perl-FindBin perl-File-Compare perl-File-Copy unzip
+            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip
+            unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
       - name: Install wheel and test deps
         run: |
