@@ -95,6 +95,7 @@ jobs:
           args: --release --out dist --features vendored-openssl
           manylinux: auto
           manifest-path: bindings/python/Cargo.toml
+          before-script-linux: yum install -y perl-IPC-Cmd || true
 
       - name: Install and verify wheel
         run: |
@@ -120,6 +121,7 @@ jobs:
           args: --release --out dist --features vendored-openssl
           manylinux: auto
           manifest-path: bindings/python/Cargo.toml
+          before-script-linux: yum install -y perl-IPC-Cmd || true
 
       - name: Install wheel and test deps
         run: |
