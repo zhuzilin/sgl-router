@@ -261,8 +261,7 @@ impl WorkerManager {
             })
             .collect();
 
-        let responses =
-            fan_out(&unique_workers, client, "metrics", reqwest::Method::GET).await;
+        let responses = fan_out(&unique_workers, client, "metrics", reqwest::Method::GET).await;
 
         let mut metric_packs = Vec::new();
         for resp in responses {
