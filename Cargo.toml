@@ -4,9 +4,7 @@ version = "0.3.2"
 edition = "2021"
 
 [features]
-default = ["grpc-client"]
-grpc-client = []
-grpc-server = []
+default = []
 
 vendored-openssl = ["openssl/vendored"]
 
@@ -59,7 +57,7 @@ tracing-log = "0.2"
 tracing-appender = "0.2.3"
 opentelemetry = "0.27"
 opentelemetry_sdk = { version = "0.27", features = ["trace", "rt-tokio"] }
-opentelemetry-otlp = { version = "0.27", features = ["trace", "grpc-tonic"] }
+opentelemetry-otlp = { version = "0.27", features = ["trace", "http-proto", "reqwest-client"] }
 tracing-opentelemetry = "0.28"
 chrono = "0.4"
 kube = { version = "1.1.0", features = ["runtime", "derive"] }
@@ -106,12 +104,6 @@ openai-harmony = { git = "https://github.com/openai/harmony", tag = "v0.0.4" }
 openmetrics-parser = "0.4.4"
 arc-swap = "1.7.1"
 
-# gRPC and Protobuf dependencies
-smg-grpc-client = "=1.0.0"
-tonic = { version = "0.14.2", features = ["gzip", "transport"] }
-prost = "0.14.1"
-prost-types = "0.14.1"
-tonic-prost = "0.14.2"
 bitflags = "2.10.0"
 once_cell = "1.21.3"
 
@@ -137,8 +129,6 @@ tempfile = "3.8"
 lazy_static = "1.4"
 wasm-encoder = "0.242"
 npyz = { version = "0.8", features = ["npz"] }  # For reading numpy .npz files in golden tests
-opentelemetry-proto = { version = "0.27", features = ["gen-tonic"] }
-tonic-v12 = { version = "0.12.3", package = "tonic" }
 serial_test = "3.0"
 rsa = { version = "0.9", features = ["sha2"] }
 

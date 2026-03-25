@@ -37,8 +37,9 @@ use crate::{
     },
     routers::{
         error::{self, extract_error_code_from_response},
-        grpc::utils::{error_type_from_status, route_to_endpoint},
-        header_utils, RouterTrait,
+        header_utils,
+        route_utils::{error_type_from_status, route_to_endpoint},
+        RouterTrait,
     },
 };
 
@@ -334,9 +335,10 @@ impl Router {
         response
     }
 
-    // Helper: return base worker URL (strips DP suffix when enabled)
+    // Helper: return base worker URL (strips DP suffix when present)
     fn worker_base_url(&self, worker_url: &str) -> String {
-        if self.dp_aware {
+        // Detect dp-aware workers by URL pattern (url@rank) regardless of global flag
+        if self.dp_aware || worker_url.contains('@') {
             if let Ok((prefix, _)) = Self::extract_dp_rank(worker_url) {
                 return prefix.to_string();
             }
@@ -498,7 +500,10 @@ impl Router {
         // Static key string to avoid per-request allocations
         const DP_RANK_KEY: &str = "data_parallel_rank";
 
-        let mut request_builder = if self.dp_aware {
+        // Detect dp-aware worker per-request: check global flag OR URL pattern (url@rank)
+        let is_dp_worker = self.dp_aware || worker_url.contains('@');
+
+        let mut request_builder = if is_dp_worker {
             let (worker_url_prefix, dp_rank) = match Self::extract_dp_rank(worker_url) {
                 Ok(tup) => tup,
                 Err(e) => {

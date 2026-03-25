@@ -88,6 +88,33 @@ valid_metric{source="worker2"} 123
 }
 
 #[test]
+fn test_aggregate_mismatched_label_names() {
+    let pack1 = MetricPack {
+        labels: vec![("worker_addr".to_string(), "http://worker-a".to_string())],
+        metrics_text: r#"
+# TYPE scheduler_num_running_reqs gauge
+scheduler_num_running_reqs{engine_type="decode",model_name="m",moe_ep_rank="0",pp_rank="0",tp_rank="0",worker_addr="http://worker-a",dp_rank="0"} 1
+"#
+        .to_string(),
+    };
+    let pack2 = MetricPack {
+        labels: vec![("worker_addr".to_string(), "http://worker-b".to_string())],
+        metrics_text: r#"
+# TYPE scheduler_num_running_reqs gauge
+scheduler_num_running_reqs{engine_type="decode",model_name="m",moe_ep_rank="0",pp_rank="0",tp_rank="0",worker_addr="http://worker-b"} 2
+"#
+        .to_string(),
+    };
+
+    let result = aggregate_metrics(vec![pack1, pack2]).unwrap();
+    let expected = r#"# TYPE scheduler_num_running_reqs gauge
+scheduler_num_running_reqs{dp_rank="0",engine_type="decode",model_name="m",moe_ep_rank="0",pp_rank="0",tp_rank="0",worker_addr="http://worker-a"} 1
+scheduler_num_running_reqs{engine_type="decode",model_name="m",moe_ep_rank="0",pp_rank="0",tp_rank="0",worker_addr="http://worker-b"} 2
+"#;
+    assert_eq_sorted(&result, expected);
+}
+
+#[test]
 fn test_real() {
     let pack1 = MetricPack {
         labels: vec![("source".to_string(), "worker1".to_string())],

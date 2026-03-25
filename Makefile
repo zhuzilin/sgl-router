@@ -136,7 +136,6 @@ install: python-install ## Build and install everything
 
 # Release management
 VERSION_FILES := Cargo.toml \
-                 bindings/golang/Cargo.toml \
                  bindings/python/Cargo.toml \
                  bindings/python/pyproject.toml \
                  bindings/python/src/sglang_router/version.py
@@ -144,7 +143,6 @@ VERSION_FILES := Cargo.toml \
 show-version: ## Show current version across all files
 	@echo "Current versions:"
 	@echo "  Cargo.toml:                 $$(grep -m1 '^version = ' Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
-	@echo "  bindings/golang/Cargo.toml: $$(grep -m1 '^version = ' bindings/golang/Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
 	@echo "  bindings/python/Cargo.toml: $$(grep -m1 '^version = ' bindings/python/Cargo.toml | sed 's/version = "\(.*\)"/\1/')"
 	@echo "  bindings/python/pyproject.toml: $$(grep -m1 '^version = ' bindings/python/pyproject.toml | sed 's/version = "\(.*\)"/\1/')"
 	@echo "  bindings/python/.../version.py: $$(grep '__version__' bindings/python/src/sglang_router/version.py | sed 's/__version__ = "\(.*\)"/\1/')"
@@ -161,8 +159,6 @@ bump-version: ## Bump version across all files (usage: make bump-version VERSION
 	@echo "Bumping version to $(VERSION)..."
 	@# Update main Cargo.toml (line 3)
 	@sed -i.bak 's/^version = ".*"/version = "$(VERSION)"/' Cargo.toml && rm -f Cargo.toml.bak
-	@# Update golang binding Cargo.toml
-	@sed -i.bak 's/^version = ".*"/version = "$(VERSION)"/' bindings/golang/Cargo.toml && rm -f bindings/golang/Cargo.toml.bak
 	@# Update python binding Cargo.toml
 	@sed -i.bak 's/^version = ".*"/version = "$(VERSION)"/' bindings/python/Cargo.toml && rm -f bindings/python/Cargo.toml.bak
 	@# Update pyproject.toml
@@ -171,7 +167,6 @@ bump-version: ## Bump version across all files (usage: make bump-version VERSION
 	@sed -i.bak 's/__version__ = ".*"/__version__ = "$(VERSION)"/' bindings/python/src/sglang_router/version.py && rm -f bindings/python/src/sglang_router/version.py.bak
 	@echo "Version updated to $(VERSION) in all files:"
 	@echo "  - Cargo.toml"
-	@echo "  - bindings/golang/Cargo.toml"
 	@echo "  - bindings/python/Cargo.toml"
 	@echo "  - bindings/python/pyproject.toml"
 	@echo "  - bindings/python/src/sglang_router/version.py"

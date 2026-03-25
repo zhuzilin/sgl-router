@@ -119,7 +119,9 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
         }
 
         // Create workers - always output as Vec for unified downstream handling
-        let workers = if config.dp_aware {
+        // Use dp-aware mode if explicitly configured OR if dp_attention was auto-detected
+        let use_dp_aware = config.dp_aware || context.data.dp_info.is_some();
+        let workers = if use_dp_aware {
             create_dp_aware_workers(
                 &context.data,
                 &normalized_url,
@@ -237,27 +239,11 @@ fn parse_worker_type(config: &WorkerConfigRequest) -> WorkerType {
 }
 
 fn determine_runtime_type(
-    connection_mode: &ConnectionMode,
-    data: &LocalWorkerWorkflowData,
-    config: &WorkerConfigRequest,
+    _connection_mode: &ConnectionMode,
+    _data: &LocalWorkerWorkflowData,
+    _config: &WorkerConfigRequest,
 ) -> RuntimeType {
-    if !matches!(connection_mode, ConnectionMode::Grpc { .. }) {
-        return RuntimeType::Sglang;
-    }
-
-    if let Some(ref detected_runtime) = data.detected_runtime_type {
-        match detected_runtime.as_str() {
-            "vllm" => RuntimeType::Vllm,
-            _ => RuntimeType::Sglang,
-        }
-    } else if let Some(ref runtime) = config.runtime {
-        match runtime.as_str() {
-            "vllm" => RuntimeType::Vllm,
-            _ => RuntimeType::Sglang,
-        }
-    } else {
-        RuntimeType::Sglang
-    }
+    RuntimeType::Sglang
 }
 
 fn build_circuit_breaker_config(app_context: &AppContext) -> CircuitBreakerConfig {
@@ -282,14 +268,11 @@ fn build_health_config(app_context: &AppContext, config: &WorkerConfigRequest) -
     }
 }
 
-fn normalize_url(url: &str, connection_mode: &ConnectionMode) -> String {
-    if url.starts_with("http://") || url.starts_with("https://") || url.starts_with("grpc://") {
+fn normalize_url(url: &str, _connection_mode: &ConnectionMode) -> String {
+    if url.starts_with("http://") || url.starts_with("https://") {
         url.to_string()
     } else {
-        match connection_mode {
-            ConnectionMode::Http => format!("http://{}", url),
-            ConnectionMode::Grpc { .. } => format!("grpc://{}", url),
-        }
+        format!("http://{}", url)
     }
 }
 

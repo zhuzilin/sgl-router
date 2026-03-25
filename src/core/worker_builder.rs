@@ -9,7 +9,7 @@ use super::{
         WorkerRoutingKeyLoad, WorkerType,
     },
 };
-use crate::{observability::metrics::Metrics, routers::grpc::client::GrpcClient};
+use crate::observability::metrics::Metrics;
 
 /// Builder for creating BasicWorker instances with fluent API
 pub struct BasicWorkerBuilder {
@@ -22,7 +22,6 @@ pub struct BasicWorkerBuilder {
     models: Vec<ModelCard>,
     health_config: HealthConfig,
     circuit_breaker_config: CircuitBreakerConfig,
-    grpc_client: Option<GrpcClient>,
 }
 
 impl BasicWorkerBuilder {
@@ -38,7 +37,6 @@ impl BasicWorkerBuilder {
             models: Vec::new(),
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
-            grpc_client: None,
         }
     }
 
@@ -54,7 +52,6 @@ impl BasicWorkerBuilder {
             models: Vec::new(),
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
-            grpc_client: None,
         }
     }
 
@@ -106,12 +103,6 @@ impl BasicWorkerBuilder {
         self
     }
 
-    /// Set gRPC client for gRPC workers
-    pub fn grpc_client(mut self, client: GrpcClient) -> Self {
-        self.grpc_client = Some(client);
-        self
-    }
-
     /// Set models this worker can serve
     pub fn models(mut self, models: Vec<ModelCard>) -> Self {
         self.models = models;
@@ -130,8 +121,6 @@ impl BasicWorkerBuilder {
             atomic::{AtomicBool, AtomicUsize},
             Arc, RwLock as StdRwLock,
         };
-
-        use tokio::sync::OnceCell;
 
         let bootstrap_host = match url::Url::parse(&self.url) {
             Ok(parsed) => parsed.host_str().unwrap_or("localhost").to_string(),
@@ -176,17 +165,6 @@ impl BasicWorkerBuilder {
             default_model_type: ModelType::LLM, // Standard LLM capabilities
         };
 
-        // Use OnceCell for lock-free gRPC client access after initialization
-        let grpc_client = Arc::new(match self.grpc_client {
-            Some(client) => {
-                let cell = OnceCell::new();
-                // Pre-set the client if provided (blocking set is fine during construction)
-                cell.set(Arc::new(client)).ok();
-                cell
-            }
-            None => OnceCell::new(),
-        });
-
         let healthy = true;
         Metrics::set_worker_health(&self.url, healthy);
 
@@ -202,7 +180,6 @@ impl BasicWorkerBuilder {
                 self.circuit_breaker_config,
                 self.url.clone(),
             ),
-            grpc_client,
             models_override: Arc::new(StdRwLock::new(None)),
         }
     }
@@ -221,7 +198,6 @@ pub struct DPAwareWorkerBuilder {
     models: Vec<ModelCard>,
     health_config: HealthConfig,
     circuit_breaker_config: CircuitBreakerConfig,
-    grpc_client: Option<GrpcClient>,
 }
 
 impl DPAwareWorkerBuilder {
@@ -239,7 +215,6 @@ impl DPAwareWorkerBuilder {
             models: Vec::new(),
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
-            grpc_client: None,
         }
     }
 
@@ -262,7 +237,6 @@ impl DPAwareWorkerBuilder {
             models: Vec::new(),
             health_config: HealthConfig::default(),
             circuit_breaker_config: CircuitBreakerConfig::default(),
-            grpc_client: None,
         }
     }
 
@@ -314,12 +288,6 @@ impl DPAwareWorkerBuilder {
         self
     }
 
-    /// Set gRPC client for gRPC workers
-    pub fn grpc_client(mut self, client: GrpcClient) -> Self {
-        self.grpc_client = Some(client);
-        self
-    }
-
     /// Set models this worker can serve
     pub fn models(mut self, models: Vec<ModelCard>) -> Self {
         self.models = models;
@@ -344,9 +312,6 @@ impl DPAwareWorkerBuilder {
             .health_config(self.health_config)
             .circuit_breaker_config(self.circuit_breaker_config);
 
-        if let Some(client) = self.grpc_client {
-            builder = builder.grpc_client(client);
-        }
         if let Some(api_key) = self.api_key {
             builder = builder.api_key(api_key);
         }
@@ -411,7 +376,7 @@ mod tests {
             .worker_type(WorkerType::Prefill {
                 bootstrap_port: None,
             })
-            .connection_mode(ConnectionMode::Grpc { port: Some(50051) })
+            .connection_mode(ConnectionMode::Http)
             .labels(labels.clone())
             .health_config(health_config.clone())
             .circuit_breaker_config(cb_config)
@@ -424,10 +389,7 @@ mod tests {
                 bootstrap_port: None
             }
         );
-        assert_eq!(
-            worker.connection_mode(),
-            &ConnectionMode::Grpc { port: Some(50051) }
-        );
+        assert_eq!(worker.connection_mode(), &ConnectionMode::Http);
         assert_eq!(worker.metadata().labels, labels);
         assert_eq!(
             worker.metadata().health_config.endpoint,
@@ -526,28 +488,6 @@ mod tests {
         assert_eq!(
             worker.metadata().health_config.success_threshold,
             health_config.success_threshold
-        );
-    }
-
-    #[test]
-    fn test_dp_aware_worker_with_grpc() {
-        let worker = DPAwareWorkerBuilder::new("grpc://cluster.local", 1, 4)
-            .worker_type(WorkerType::Decode)
-            .connection_mode(ConnectionMode::Grpc { port: Some(50051) })
-            .label("transport", "grpc")
-            .build();
-
-        assert_eq!(worker.url(), "grpc://cluster.local@1");
-        assert_eq!(worker.dp_rank(), Some(1));
-        assert_eq!(worker.dp_size(), Some(4));
-        assert_eq!(worker.worker_type(), &WorkerType::Decode);
-        assert_eq!(
-            worker.connection_mode(),
-            &ConnectionMode::Grpc { port: Some(50051) }
-        );
-        assert_eq!(
-            worker.metadata().labels.get("transport"),
-            Some(&"grpc".to_string())
         );
     }
 }

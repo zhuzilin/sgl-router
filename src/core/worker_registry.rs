@@ -576,7 +576,6 @@ impl WorkerRegistry {
         let mut prefill_count = 0;
         let mut decode_count = 0;
         let mut http_count = 0;
-        let mut grpc_count = 0;
         let mut cb_open_count = 0;
         let mut cb_half_open_count = 0;
 
@@ -596,7 +595,6 @@ impl WorkerRegistry {
 
             match worker.connection_mode() {
                 ConnectionMode::Http => http_count += 1,
-                ConnectionMode::Grpc { .. } => grpc_count += 1,
             }
 
             match worker.circuit_breaker().state() {
@@ -616,7 +614,6 @@ impl WorkerRegistry {
             prefill_workers: prefill_count,
             decode_workers: decode_count,
             http_workers: http_count,
-            grpc_workers: grpc_count,
             circuit_breaker_open: cb_open_count,
             circuit_breaker_half_open: cb_half_open_count,
         }
@@ -719,8 +716,6 @@ pub struct WorkerRegistryStats {
     pub decode_workers: usize,
     /// Number of HTTP-connected workers
     pub http_workers: usize,
-    /// Number of gRPC-connected workers
-    pub grpc_workers: usize,
     /// Number of workers with circuit breaker in Open state (not accepting requests)
     pub circuit_breaker_open: usize,
     /// Number of workers with circuit breaker in HalfOpen state (testing recovery)

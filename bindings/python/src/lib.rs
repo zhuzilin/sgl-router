@@ -397,7 +397,6 @@ struct Router {
     queue_size: usize,
     queue_timeout_secs: u64,
     rate_limit_tokens_per_second: Option<i32>,
-    connection_mode: core::ConnectionMode,
     model_path: Option<String>,
     tokenizer_path: Option<String>,
     chat_template: Option<String>,
@@ -424,15 +423,6 @@ struct Router {
 }
 
 impl Router {
-    fn determine_connection_mode(worker_urls: &[String]) -> core::ConnectionMode {
-        for url in worker_urls {
-            if url.starts_with("grpc://") || url.starts_with("grpcs://") {
-                return core::ConnectionMode::Grpc { port: None };
-            }
-        }
-        core::ConnectionMode::Http
-    }
-
     pub fn to_router_config(&self) -> config::ConfigResult<config::RouterConfig> {
         use config::{
             DiscoveryConfig, MetricsConfig, PolicyConfig as ConfigPolicyConfig, RoutingMode,
@@ -565,7 +555,7 @@ impl Router {
             .policy(policy)
             .host(&self.host)
             .port(self.port)
-            .connection_mode(self.connection_mode.clone())
+            .connection_mode(core::ConnectionMode::Http)
             .max_payload_size(self.max_payload_size)
             .request_timeout_secs(self.request_timeout_secs)
             .worker_startup_timeout_secs(self.worker_startup_timeout_secs)
@@ -824,8 +814,6 @@ impl Router {
             all_urls.extend(decode_urls.clone());
         }
 
-        let connection_mode = Self::determine_connection_mode(&all_urls);
-
         Ok(Router {
             host,
             port,
@@ -888,7 +876,6 @@ impl Router {
             queue_size,
             queue_timeout_secs,
             rate_limit_tokens_per_second,
-            connection_mode,
             model_path,
             tokenizer_path,
             chat_template,
