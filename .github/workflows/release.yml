@@ -9,23 +9,7 @@ permissions:
 
 jobs:
   build-wheels:
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-            artifact: linux-x86_64
-          - os: ubuntu-latest
-            target: aarch64-unknown-linux-gnu
-            artifact: linux-aarch64
-          - os: macos-latest
-            target: x86_64-apple-darwin
-            artifact: macos-x86_64
-          - os: macos-latest
-            target: aarch64-apple-darwin
-            artifact: macos-aarch64
-
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
@@ -37,16 +21,12 @@ jobs:
       - name: Build wheel
         uses: PyO3/maturin-action@v1
         with:
-          target: ${{ matrix.target }}
+          target: x86_64-unknown-linux-gnu
           args: --release --out dist
           manylinux: 2_28
           working-directory: bindings/python
           before-script-linux: |
-            if command -v dnf > /dev/null 2>&1; then
-              dnf install -y openssl-devel
-            elif command -v apt-get > /dev/null 2>&1; then
-              apt-get update && apt-get install -y libssl-dev pkg-config
-            fi
+            dnf install -y openssl-devel
             ARCH=$(uname -m)
             curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-${ARCH}.zip
             unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
@@ -54,7 +34,7 @@ jobs:
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-${{ matrix.artifact }}
+          name: wheel-linux-x86_64
           path: bindings/python/dist/*.whl
 
   release:
