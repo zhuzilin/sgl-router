@@ -145,16 +145,6 @@ impl RouterConfigBuilder {
         self
     }
 
-    pub fn grpc_connection(mut self, port: Option<u16>) -> Self {
-        self.config.connection_mode = ConnectionMode::Grpc { port };
-        self
-    }
-
-    pub fn grpc_connection_default(mut self) -> Self {
-        self.config.connection_mode = ConnectionMode::Grpc { port: None };
-        self
-    }
-
     pub fn host<S: Into<String>>(mut self, host: S) -> Self {
         self.config.host = host.into();
         self

@@ -516,7 +516,7 @@ impl AppContextBuilder {
         self.wasm_manager = if config.enable_wasm {
             Some(Arc::new(
                 WasmModuleManager::new(WasmRuntimeConfig::default())
-                    .map_err(|e| format!("Failed to initialize WASM module manager: {}", e))?,
+                    .map_err(|e| format!("Failed to create WasmModuleManager: {e}"))?,
             ))
         } else {
             None

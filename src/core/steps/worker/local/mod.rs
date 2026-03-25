@@ -13,11 +13,10 @@ mod update_worker_properties;
 
 use std::{sync::Arc, time::Duration};
 
-/// Strip protocol prefix (http://, https://, grpc://) from URL.
+/// Strip protocol prefix (http://, https://) from URL.
 pub(crate) fn strip_protocol(url: &str) -> String {
     url.trim_start_matches("http://")
         .trim_start_matches("https://")
-        .trim_start_matches("grpc://")
         .to_string()
 }
 

@@ -1,5 +1,6 @@
-use anyhow::ensure;
-use openmetrics_parser::{MetricFamily, MetricsExposition, PrometheusType, PrometheusValue};
+use std::collections::BTreeMap;
+
+use openmetrics_parser::{MetricsExposition, PrometheusType, PrometheusValue};
 use tracing::warn;
 
 #[derive(Debug)]
@@ -9,11 +10,16 @@ pub struct MetricPack {
 }
 
 type PrometheusExposition = MetricsExposition<PrometheusType, PrometheusValue>;
-type PrometheusFamily = MetricFamily<PrometheusType, PrometheusValue>;
+
+#[derive(Default)]
+struct AggregatedFamilyText {
+    metadata_lines: Vec<String>,
+    sample_lines: Vec<String>,
+}
 
 /// Aggregate Prometheus metrics scraped from multiple sources into a unified one
 pub fn aggregate_metrics(metric_packs: Vec<MetricPack>) -> anyhow::Result<String> {
-    let mut expositions = vec![];
+    let mut families = BTreeMap::<String, AggregatedFamilyText>::new();
     for metric_pack in metric_packs {
         let metrics_text = &metric_pack.metrics_text;
         // openmetrics_parser doesn't handle colons in metric names; replace with underscores
@@ -30,13 +36,10 @@ pub fn aggregate_metrics(metric_packs: Vec<MetricPack>) -> anyhow::Result<String
             }
         };
         let exposition = transform_metrics(exposition, &metric_pack.labels);
-        expositions.push(exposition);
+        append_exposition_text(exposition, &mut families);
     }
 
-    let text = try_reduce(expositions.into_iter(), merge_exposition)?
-        .map(|x| format!("{x}"))
-        .unwrap_or_default();
-    Ok(text)
+    Ok(render_aggregated_families(families))
 }
 
 fn transform_metrics(
@@ -49,43 +52,38 @@ fn transform_metrics(
     exposition
 }
 
-fn merge_exposition(
-    a: PrometheusExposition,
-    b: PrometheusExposition,
-) -> anyhow::Result<PrometheusExposition> {
-    let mut ans = a;
-    for (name, family_b) in b.families.into_iter() {
-        let family_merged = if let Some(family_a) = ans.families.remove(&name) {
-            merge_family(family_a, family_b)?
-        } else {
-            family_b
-        };
-        ans.families.insert(name, family_merged);
+fn append_exposition_text(
+    exposition: PrometheusExposition,
+    aggregated: &mut BTreeMap<String, AggregatedFamilyText>,
+) {
+    for (name, family) in exposition.families {
+        let entry = aggregated.entry(name).or_default();
+        for line in format!("{family}").lines().filter(|line| !line.is_empty()) {
+            if line.starts_with("# ") {
+                if !entry.metadata_lines.iter().any(|existing| existing == line) {
+                    entry.metadata_lines.push(line.to_string());
+                }
+            } else {
+                entry.sample_lines.push(line.to_string());
+            }
+        }
     }
-    Ok(ans)
 }
 
-fn merge_family(a: PrometheusFamily, b: PrometheusFamily) -> anyhow::Result<PrometheusFamily> {
-    ensure!(
-        a.get_label_names() == b.get_label_names(),
-        "Label names should agree a={:?} b={:?}",
-        a.get_label_names(),
-        b.get_label_names()
-    );
-    a.with_samples(b.into_iter_samples())
-        .map_err(|e| anyhow::anyhow!("failed to merge samples: {e:?}"))
-}
+fn render_aggregated_families(families: BTreeMap<String, AggregatedFamilyText>) -> String {
+    let mut blocks = Vec::new();
 
-fn try_reduce<I, T, E, F>(iterable: I, f: F) -> Result<Option<T>, E>
-where
-    I: IntoIterator<Item = T>,
-    F: FnMut(T, T) -> Result<T, E>,
-{
-    let mut it = iterable.into_iter();
-    let first = match it.next() {
-        None => return Ok(None),
-        Some(x) => x,
-    };
+    for family in families.into_values() {
+        let mut lines = family.metadata_lines;
+        lines.extend(family.sample_lines);
+        if !lines.is_empty() {
+            blocks.push(lines.join("\n"));
+        }
+    }
 
-    Ok(Some(it.try_fold(first, f)?))
+    if blocks.is_empty() {
+        String::new()
+    } else {
+        format!("{}\n", blocks.join("\n\n"))
+    }
 }

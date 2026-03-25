@@ -55,8 +55,6 @@ pub mod router_ids {
     pub const HTTP_REGULAR: RouterId = RouterId::new("http-regular");
     pub const HTTP_PD: RouterId = RouterId::new("http-pd");
     pub const HTTP_OPENAI: RouterId = RouterId::new("http-openai");
-    pub const GRPC_REGULAR: RouterId = RouterId::new("grpc-regular");
-    pub const GRPC_PD: RouterId = RouterId::new("grpc-pd");
 }
 
 pub struct RouterManager {
@@ -101,17 +99,6 @@ impl RouterManager {
                 }
             }
 
-            // Always create gRPC Regular router in IGW mode
-            match RouterFactory::create_grpc_router(app_context).await {
-                Ok(grpc_regular) => {
-                    info!("Created gRPC Regular router");
-                    manager.register_router(router_ids::GRPC_REGULAR, Arc::from(grpc_regular));
-                }
-                Err(e) => {
-                    warn!("Failed to create gRPC Regular router: {e}");
-                }
-            }
-
             info!("PD disaggregation auto-enabled for IGW mode, creating PD routers");
 
             // Create HTTP PD router
@@ -129,24 +116,6 @@ impl RouterManager {
                 }
                 Err(e) => {
                     warn!("Failed to create HTTP PD router: {e}");
-                }
-            }
-
-            // Create gRPC PD router
-            match RouterFactory::create_grpc_pd_router(
-                None,
-                None,
-                &config.router_config.policy,
-                app_context,
-            )
-            .await
-            {
-                Ok(grpc_pd) => {
-                    info!("Created gRPC PD router");
-                    manager.register_router(router_ids::GRPC_PD, Arc::from(grpc_pd));
-                }
-                Err(e) => {
-                    warn!("Failed to create gRPC PD router: {e}");
                 }
             }
 
@@ -194,9 +163,6 @@ impl RouterManager {
             (ConnectionMode::Http, RoutingMode::Regular { .. }) => router_ids::HTTP_REGULAR,
             (ConnectionMode::Http, RoutingMode::PrefillDecode { .. }) => router_ids::HTTP_PD,
             (ConnectionMode::Http, RoutingMode::OpenAI { .. }) => router_ids::HTTP_OPENAI,
-            (ConnectionMode::Grpc { .. }, RoutingMode::Regular { .. }) => router_ids::GRPC_REGULAR,
-            (ConnectionMode::Grpc { .. }, RoutingMode::PrefillDecode { .. }) => router_ids::GRPC_PD,
-            (ConnectionMode::Grpc { .. }, RoutingMode::OpenAI { .. }) => router_ids::GRPC_REGULAR,
         }
     }
 
@@ -281,7 +247,7 @@ impl RouterManager {
         let workers = self.worker_registry.get_by_model(model_id);
 
         // Find the best router ID based on worker capabilities
-        // Priority: external (OpenAI) > grpc-pd > http-pd > grpc-regular > http-regular
+        // Priority: external (OpenAI) > http-pd > http-regular
         let best_router_id = workers
             .iter()
             .map(|w| {
@@ -289,19 +255,17 @@ impl RouterManager {
                     w.worker_type(),
                     WorkerType::Prefill { .. } | WorkerType::Decode
                 );
-                let is_grpc = matches!(w.connection_mode(), ConnectionMode::Grpc { .. });
                 let is_external = matches!(w.metadata().runtime_type, RuntimeType::External);
 
                 if is_external {
                     // External workers should be routed via OpenAI-compatible router
-                    return (4, &router_ids::HTTP_OPENAI);
+                    return (2, &router_ids::HTTP_OPENAI);
                 }
 
-                match (is_grpc, is_pd) {
-                    (true, true) => (3, &router_ids::GRPC_PD),
-                    (false, true) => (2, &router_ids::HTTP_PD),
-                    (true, false) => (1, &router_ids::GRPC_REGULAR),
-                    (false, false) => (0, &router_ids::HTTP_REGULAR),
+                if is_pd {
+                    (1, &router_ids::HTTP_PD)
+                } else {
+                    (0, &router_ids::HTTP_REGULAR)
                 }
             })
             .max_by_key(|(score, _)| *score)

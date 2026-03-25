@@ -400,9 +400,19 @@ impl JobQueue {
                     .get()
                     .ok_or_else(|| "Workflow engines not initialized".to_string())?;
 
+                // Detect dp-aware: use global flag OR check if workers with url@* pattern exist
+                let dp_aware = context.router_config.dp_aware || {
+                    let prefix = format!("{}@", url);
+                    context
+                        .worker_registry
+                        .get_all()
+                        .iter()
+                        .any(|w| w.url().starts_with(&prefix))
+                };
+
                 let workflow_data = create_worker_removal_workflow_data(
                     url.to_string(),
-                    context.router_config.dp_aware,
+                    dp_aware,
                     Arc::clone(context),
                 );
 
