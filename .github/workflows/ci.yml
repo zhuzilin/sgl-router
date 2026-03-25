@@ -92,11 +92,11 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64-unknown-linux-gnu
-          args: --release --out dist --features vendored-openssl
+          args: --release --out dist
           manylinux: 2_28
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
-            dnf install -y perl-IPC-Cmd
+            dnf install -y openssl-devel
             curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip
             unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
@@ -121,11 +121,11 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64-unknown-linux-gnu
-          args: --release --out dist --features vendored-openssl
+          args: --release --out dist
           manylinux: 2_28
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
-            dnf install -y perl-IPC-Cmd
+            dnf install -y openssl-devel
             curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip
             unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
