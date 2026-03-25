@@ -17,6 +17,9 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
       - name: Check compilation
         run: cargo check --all-targets --features vendored-openssl
 
@@ -33,6 +36,9 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+
+      - name: Install protobuf compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
 
       - name: Clippy
         run: cargo clippy --all-targets --features vendored-openssl -- -D warnings
@@ -71,6 +77,9 @@ jobs:
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
             dnf install -y openssl-devel
+            ARCH=$(uname -m)
+            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-${ARCH}.zip
+            unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
       - name: Install and verify wheel
         run: |
@@ -98,6 +107,9 @@ jobs:
           manifest-path: bindings/python/Cargo.toml
           before-script-linux: |
             dnf install -y openssl-devel
+            ARCH=$(uname -m)
+            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-${ARCH}.zip
+            unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
       - name: Install wheel and test deps
         run: |
