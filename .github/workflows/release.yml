@@ -38,10 +38,15 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: ${{ matrix.target }}
-          args: --release --out dist --features vendored-openssl
+          args: --release --out dist
           manylinux: 2_28
           working-directory: bindings/python
           before-script-linux: |
+            if command -v dnf > /dev/null 2>&1; then
+              dnf install -y openssl-devel
+            elif command -v apt-get > /dev/null 2>&1; then
+              apt-get update && apt-get install -y libssl-dev pkg-config
+            fi
             ARCH=$(uname -m)
             curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-${ARCH}.zip
             unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
