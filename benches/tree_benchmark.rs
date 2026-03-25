@@ -41,7 +41,7 @@ fn add_result(category: &str, result: String) {
     results.insert(key, result);
 }
 
-/// Simulated HTTP/gRPC endpoints representing worker nodes
+/// Simulated HTTP endpoints representing worker nodes
 /// These mirror real-world deployment patterns with 10 tenants
 const ENDPOINT_TENANTS: [&str; 10] = [
     "http://worker-0.sglang.svc.cluster.local:8000",
@@ -49,9 +49,9 @@ const ENDPOINT_TENANTS: [&str; 10] = [
     "http://worker-2.sglang.svc.cluster.local:8000",
     "http://worker-3.sglang.svc.cluster.local:8000",
     "http://worker-4.sglang.svc.cluster.local:8000",
-    "grpc://worker-5.sglang.svc.cluster.local:50051",
-    "grpc://worker-6.sglang.svc.cluster.local:50051",
-    "grpc://worker-7.sglang.svc.cluster.local:50051",
+    "http://worker-5.sglang.svc.cluster.local:8000",
+    "http://worker-6.sglang.svc.cluster.local:8000",
+    "http://worker-7.sglang.svc.cluster.local:8000",
     "http://10.0.0.100:8000",
     "http://10.0.0.101:8000",
 ];
@@ -767,13 +767,7 @@ fn bench_multi_tenant(c: &mut Criterion) {
 /// Generate worker endpoint URLs for scaling tests
 fn generate_worker_endpoints(count: usize) -> Vec<String> {
     (0..count)
-        .map(|i| {
-            if i % 4 == 0 {
-                format!("grpc://worker-{}.sglang.svc.cluster.local:50051", i)
-            } else {
-                format!("http://worker-{}.sglang.svc.cluster.local:8000", i)
-            }
-        })
+        .map(|i| format!("http://worker-{}.sglang.svc.cluster.local:8000", i))
         .collect()
 }
 
