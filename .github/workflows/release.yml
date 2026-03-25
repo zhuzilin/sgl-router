@@ -41,7 +41,9 @@ jobs:
           args: --release --out dist --features vendored-openssl
           manylinux: auto
           manifest-path: bindings/python/Cargo.toml
-          before-script-linux: yum install -y perl-core protobuf-compiler protobuf-devel || apk add --no-cache perl protobuf-dev || true
+          before-script-linux: |
+            yum install -y perl-core || apk add --no-cache perl || true
+            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-x86_64.zip && unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v4
