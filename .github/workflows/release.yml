@@ -1,0 +1,101 @@
+name: Build and Release Wheels
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  build-wheels:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: linux-x86_64
+          - os: ubuntu-latest
+            target: aarch64-unknown-linux-gnu
+            artifact: linux-aarch64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            artifact: macos-aarch64
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build wheel
+        uses: PyO3/maturin-action@v1
+        with:
+          target: ${{ matrix.target }}
+          args: --release --out dist --features vendored-openssl
+          manylinux: auto
+          working-directory: bindings/python
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.artifact }}
+          path: bindings/python/dist/*.whl
+
+  release:
+    needs: build-wheels
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all wheel artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: wheel-*
+          merge-multiple: true
+
+      - name: Get version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import re
+          with open('bindings/python/pyproject.toml') as f:
+              content = f.read()
+          match = re.search(r'version\s*=\s*\"(.+?)\"', content)
+          print(match.group(1))
+          ")
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${VERSION}-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: List wheels
+        run: ls -la dist/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          name: "Release ${{ steps.version.outputs.tag }}"
+          body: |
+            Automated release from commit ${{ github.sha }}
+
+            ## Install
+
+            Find the wheel for your platform below and install with:
+            ```
+            pip install <wheel-url>
+            ```
+
+            Or install the latest release directly:
+            ```
+            pip install sglang-router --find-links https://github.com/${{ github.repository }}/releases/latest
+            ```
+          files: dist/*.whl
+          generate_release_notes: true
