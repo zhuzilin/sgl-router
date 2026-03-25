@@ -32,6 +32,12 @@ struct WorkerResponse {
     result: Result<reqwest::Response, reqwest::Error>,
 }
 
+/// Strip the `@rank` suffix from dp-aware worker URLs.
+/// E.g. `http://host:port@0` → `http://host:port`.
+fn strip_dp_suffix(url: &str) -> &str {
+    url.rsplit_once('@').map_or(url, |(base, _)| base)
+}
+
 /// Fan out requests to workers in parallel
 async fn fan_out(
     workers: &[Arc<dyn Worker>],
@@ -44,7 +50,8 @@ async fn fan_out(
         .map(|worker| {
             let client = client.clone();
             let url = worker.url().to_string();
-            let full_url = format!("{}/{}", url, endpoint);
+            let base_url = strip_dp_suffix(&url).to_string();
+            let full_url = format!("{}/{}", base_url, endpoint);
             let api_key = worker.api_key().clone();
             let method = method.clone();
 
@@ -239,15 +246,37 @@ impl WorkerManager {
             return EngineMetricsResult::Err("No available workers".to_string());
         }
 
-        let responses = fan_out(&workers, client, "metrics", reqwest::Method::GET).await;
+        // Deduplicate base URLs: dp-aware workers (url@rank) share the same
+        // physical server, so we only need to scrape /metrics once per base URL.
+        let mut seen = std::collections::HashSet::new();
+        let unique_workers: Vec<_> = workers
+            .into_iter()
+            .filter(|w| {
+                let base = if let Some(pos) = w.url().rfind('@') {
+                    &w.url()[..pos]
+                } else {
+                    w.url()
+                };
+                seen.insert(base.to_string())
+            })
+            .collect();
+
+        let responses =
+            fan_out(&unique_workers, client, "metrics", reqwest::Method::GET).await;
 
         let mut metric_packs = Vec::new();
         for resp in responses {
+            // Use the base URL (strip @rank) for the actual HTTP request label
+            let base_url = if let Some(pos) = resp.url.rfind('@') {
+                resp.url[..pos].to_string()
+            } else {
+                resp.url.clone()
+            };
             if let Ok(r) = resp.result {
                 if r.status().is_success() {
                     if let Ok(text) = r.text().await {
                         metric_packs.push(MetricPack {
-                            labels: vec![("worker_addr".into(), resp.url)],
+                            labels: vec![("worker_addr".into(), base_url)],
                             metrics_text: text,
                         });
                     }

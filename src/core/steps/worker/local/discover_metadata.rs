@@ -33,6 +33,7 @@ pub struct ServerInfo {
     pub served_model_name: Option<String>,
     pub tp_size: Option<usize>,
     pub dp_size: Option<usize>,
+    pub enable_dp_attention: Option<bool>,
     pub load_balance_method: Option<String>,
     pub disaggregation_mode: Option<String>,
     pub version: Option<String>,
@@ -255,6 +256,12 @@ impl StepExecutor<LocalWorkerWorkflowData> for DiscoverMetadataStep {
                     }
                     if let Some(dp_size) = server_info.dp_size {
                         labels.insert("dp_size".to_string(), dp_size.to_string());
+                    }
+                    if let Some(enable_dp_attention) = server_info.enable_dp_attention {
+                        labels.insert(
+                            "enable_dp_attention".to_string(),
+                            enable_dp_attention.to_string(),
+                        );
                     }
                     if let Some(load_balance_method) = server_info.load_balance_method {
                         labels.insert("load_balance_method".to_string(), load_balance_method);
