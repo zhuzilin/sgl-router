@@ -984,6 +984,12 @@ fn get_verbose_version_string() -> String {
     version::get_verbose_version_string()
 }
 
+/// Get the git commit hash (short) used to build this binary
+#[pyfunction]
+fn get_git_commit() -> &'static str {
+    version::GIT_COMMIT
+}
+
 /// Get the list of available tool call parsers from the Rust factory.
 #[pyfunction]
 fn get_available_tool_call_parsers() -> Vec<String> {
@@ -1011,6 +1017,7 @@ fn sglang_router_rs(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Router>()?;
     m.add_function(wrap_pyfunction!(get_version_string, m)?)?;
     m.add_function(wrap_pyfunction!(get_verbose_version_string, m)?)?;
+    m.add_function(wrap_pyfunction!(get_git_commit, m)?)?;
     m.add_function(wrap_pyfunction!(get_available_tool_call_parsers, m)?)?;
     Ok(())
 }
