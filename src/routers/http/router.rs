@@ -335,10 +335,9 @@ impl Router {
         response
     }
 
-    // Helper: return base worker URL (strips DP suffix when present)
+    // Helper: return base worker URL (strips DP suffix when enabled)
     fn worker_base_url(&self, worker_url: &str) -> String {
-        // Detect dp-aware workers by URL pattern (url@rank) regardless of global flag
-        if self.dp_aware || worker_url.contains('@') {
+        if self.dp_aware {
             if let Ok((prefix, _)) = Self::extract_dp_rank(worker_url) {
                 return prefix.to_string();
             }
@@ -500,10 +499,7 @@ impl Router {
         // Static key string to avoid per-request allocations
         const DP_RANK_KEY: &str = "data_parallel_rank";
 
-        // Detect dp-aware worker per-request: check global flag OR URL pattern (url@rank)
-        let is_dp_worker = self.dp_aware || worker_url.contains('@');
-
-        let mut request_builder = if is_dp_worker {
+        let mut request_builder = if self.dp_aware {
             let (worker_url_prefix, dp_rank) = match Self::extract_dp_rank(worker_url) {
                 Ok(tup) => tup,
                 Err(e) => {

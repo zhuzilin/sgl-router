@@ -72,7 +72,7 @@ impl PDRouter {
         headers: Option<Vec<(String, String)>>,
     ) -> Response {
         let workers = self.worker_registry.get_prefill_workers();
-        let first_worker_url = workers.first().map(|w| w.base_url().to_string());
+        let first_worker_url = workers.first().map(|w| w.url().to_string());
 
         if let Some(worker_url) = first_worker_url {
             self.proxy_to_worker(worker_url, endpoint, headers).await
@@ -550,42 +550,20 @@ impl PDRouter {
         inject_trace_context_http(&mut headers_with_trace);
         let headers = Some(&headers_with_trace);
 
-        // Prepare requests for DP-aware workers (injects data_parallel_rank if needed)
-        let prefill_json = match prefill.prepare_request(json_request.clone()).await {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to prepare prefill request: {}", e);
-                return error::internal_error(
-                    "dp_request_preparation_failed",
-                    format!("Failed to prepare prefill request: {}", e),
-                );
-            }
-        };
-        let decode_json = match decode.prepare_request(json_request).await {
-            Ok(req) => req,
-            Err(e) => {
-                error!("Failed to prepare decode request: {}", e);
-                return error::internal_error(
-                    "dp_request_preparation_failed",
-                    format!("Failed to prepare decode request: {}", e),
-                );
-            }
-        };
-
-        // Build both requests using base_url() to strip @rank suffix for DP-aware workers
+        // Build both requests
         let prefill_request = self.build_post_with_headers(
             &self.client,
-            prefill.base_url(),
+            prefill.url(),
             context.route,
-            &prefill_json,
+            &json_request,
             headers,
             false,
         );
         let decode_request = self.build_post_with_headers(
             &self.client,
-            decode.base_url(),
+            decode.url(),
             context.route,
-            &decode_json,
+            &json_request,
             headers,
             false,
         );

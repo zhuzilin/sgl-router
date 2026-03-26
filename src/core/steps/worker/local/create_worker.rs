@@ -119,9 +119,7 @@ impl StepExecutor<LocalWorkerWorkflowData> for CreateLocalWorkerStep {
         }
 
         // Create workers - always output as Vec for unified downstream handling
-        // Use dp-aware mode if explicitly configured OR if dp_attention was auto-detected
-        let use_dp_aware = config.dp_aware || context.data.dp_info.is_some();
-        let workers = if use_dp_aware {
+        let workers = if config.dp_aware {
             create_dp_aware_workers(
                 &context.data,
                 &normalized_url,

@@ -35,19 +35,6 @@ pub async fn get_dp_info(url: &str, api_key: Option<&str>) -> Result<DpInfo, Str
     Ok(DpInfo { dp_size, model_id })
 }
 
-/// Check if discovered labels indicate dp_attention is enabled with dp_size > 1.
-fn is_dp_attention_detected(labels: &std::collections::HashMap<String, String>) -> bool {
-    let dp_attention_enabled = labels
-        .get("enable_dp_attention")
-        .map(|v| v == "true")
-        .unwrap_or(false);
-    let dp_size = labels
-        .get("dp_size")
-        .and_then(|v| v.parse::<usize>().ok())
-        .unwrap_or(1);
-    dp_attention_enabled && dp_size > 1
-}
-
 /// Step 2b: Discover DP (Data Parallel) information (only for DP-aware workers).
 pub struct DiscoverDPInfoStep;
 
@@ -59,30 +46,15 @@ impl StepExecutor<LocalWorkerWorkflowData> for DiscoverDPInfoStep {
     ) -> WorkflowResult<StepResult> {
         let config = &context.data.config;
 
-        // Auto-detect dp_attention from discovered metadata labels
-        let dp_attention_detected = is_dp_attention_detected(&context.data.discovered_labels);
-
-        if !config.dp_aware && !dp_attention_detected {
+        if !config.dp_aware {
             debug!(
-                "Worker {} is not DP-aware and dp_attention not detected, skipping DP discovery",
+                "Worker {} is not DP-aware, skipping DP discovery",
                 config.url
             );
             return Ok(StepResult::Success);
         }
 
-        if dp_attention_detected {
-            debug!(
-                "Auto-detected dp_attention for {} (dp_size: {})",
-                config.url,
-                context
-                    .data
-                    .discovered_labels
-                    .get("dp_size")
-                    .unwrap_or(&"?".to_string())
-            );
-        } else {
-            debug!("Discovering DP info for {} (DP-aware)", config.url);
-        }
+        debug!("Discovering DP info for {} (DP-aware)", config.url);
 
         let dp_info = get_dp_info(&config.url, config.api_key.as_deref())
             .await
