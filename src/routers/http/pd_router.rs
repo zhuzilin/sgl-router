@@ -191,6 +191,29 @@ impl PDRouter {
         None
     }
 
+    fn build_generate_context<'a>(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &'a GenerateRequest,
+        model_id: Option<&'a str>,
+    ) -> PDRequestContext<'a> {
+        let request_text = if self.policies_need_request_text() {
+            body.text.as_deref().map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        PDRequestContext {
+            route: "/generate",
+            batch_size: Self::get_generate_batch_size(body),
+            is_stream: body.stream,
+            return_logprob: body.return_logprob.unwrap_or(false),
+            request_text,
+            model_id,
+            headers: headers.cloned(),
+        }
+    }
+
     fn get_chat_batch_size(req: &ChatCompletionRequest) -> Option<usize> {
         if let Some(n) = req.n {
             if n > 1 {
@@ -1251,28 +1274,21 @@ impl RouterTrait for PDRouter {
         body: &GenerateRequest,
         model_id: Option<&str>,
     ) -> Response {
-        let is_stream = body.stream;
-        let return_logprob = body.return_logprob.unwrap_or(false);
-
-        let request_text = if self.policies_need_request_text() {
-            body.text.as_deref().map(|s| s.to_string())
-        } else {
-            None
-        };
-
-        let batch_size = Self::get_generate_batch_size(body);
-
-        let context = PDRequestContext {
-            route: "/generate",
-            batch_size,
-            is_stream,
-            return_logprob,
-            request_text,
-            model_id,
-            headers: headers.cloned(),
-        };
+        let context = self.build_generate_context(headers, body, model_id);
 
         self.execute_dual_dispatch(headers, body, context).await
+    }
+
+    async fn route_generate_raw(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &GenerateRequest,
+        raw_body: &Value,
+        model_id: Option<&str>,
+    ) -> Response {
+        let context = self.build_generate_context(headers, body, model_id);
+
+        self.execute_dual_dispatch(headers, raw_body, context).await
     }
 
     async fn route_chat(
