@@ -20,6 +20,9 @@ jobs:
 
       - name: Build wheel
         uses: PyO3/maturin-action@v1
+        env:
+          GIT_COMMIT_SHA: ${{ github.sha }}
+          GIT_BRANCH_NAME: ${{ github.ref_name }}
         with:
           target: x86_64-unknown-linux-gnu
           args: --release --out dist

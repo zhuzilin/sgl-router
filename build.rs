@@ -13,6 +13,8 @@ macro_rules! set_env {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Rebuild triggers
     println!("cargo:rerun-if-changed=Cargo.toml");
+    println!("cargo:rerun-if-env-changed=GIT_COMMIT_SHA");
+    println!("cargo:rerun-if-env-changed=GIT_BRANCH_NAME");
 
     // Set version info environment variables
     let version = read_cargo_version().unwrap_or_else(|_| DEFAULT_VERSION.to_string());
@@ -79,11 +81,16 @@ fn run_cmd(cmd: &str, args: &[&str]) -> Option<String> {
 }
 
 fn git_branch() -> Option<String> {
-    run_cmd("git", &["rev-parse", "--abbrev-ref", "HEAD"])
+    std::env::var("GIT_BRANCH_NAME").ok()
+        .filter(|s| !s.is_empty())
+        .or_else(|| run_cmd("git", &["rev-parse", "--abbrev-ref", "HEAD"]))
 }
 
 fn git_commit() -> Option<String> {
-    run_cmd("git", &["rev-parse", "--short", "HEAD"])
+    std::env::var("GIT_COMMIT_SHA").ok()
+        .filter(|s| !s.is_empty())
+        .map(|s| if s.len() > 7 { s[..7].to_string() } else { s })
+        .or_else(|| run_cmd("git", &["rev-parse", "--short", "HEAD"]))
 }
 
 fn git_status() -> Option<String> {
