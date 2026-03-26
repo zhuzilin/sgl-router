@@ -346,24 +346,35 @@ async fn generate_handler(
                 .unwrap()
                 .as_secs_f64();
 
+            let mut meta_info = json!({
+                "prompt_tokens": 10,
+                "completion_tokens": 5,
+                "completion_tokens_wo_jump_forward": 5,
+                "input_token_logprobs": null,
+                "output_token_logprobs": null,
+                "first_token_latency": stream_delay as f64 / 1000.0,
+                "time_to_first_token": stream_delay as f64 / 1000.0,
+                "time_per_output_token": 0.01,
+                "end_time": timestamp_start + (stream_delay as f64 / 1000.0),
+                "start_time": timestamp_start,
+                "finish_reason": {
+                    "type": "stop",
+                    "reason": "length"
+                }
+            });
+            if let Some(return_routed_experts) = payload.get("return_routed_experts").cloned() {
+                meta_info
+                    .as_object_mut()
+                    .expect("meta_info should be an object")
+                    .insert(
+                        "echo_return_routed_experts".to_string(),
+                        return_routed_experts,
+                    );
+            }
+
             let data = json!({
                 "text": format!("Mock response {}", i + 1),
-                "meta_info": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 5,
-                    "completion_tokens_wo_jump_forward": 5,
-                    "input_token_logprobs": null,
-                    "output_token_logprobs": null,
-                    "first_token_latency": stream_delay as f64 / 1000.0,
-                    "time_to_first_token": stream_delay as f64 / 1000.0,
-                    "time_per_output_token": 0.01,
-                    "end_time": timestamp_start + (stream_delay as f64 / 1000.0),
-                    "start_time": timestamp_start,
-                    "finish_reason": {
-                        "type": "stop",
-                        "reason": "length"
-                    }
-                },
+                "meta_info": meta_info,
                 "stage": "mid"
             });
 
@@ -381,24 +392,35 @@ async fn generate_handler(
         )
             .into_response()
     } else {
+        let mut meta_info = json!({
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "completion_tokens_wo_jump_forward": 5,
+            "input_token_logprobs": null,
+            "output_token_logprobs": null,
+            "first_token_latency": config.response_delay_ms as f64 / 1000.0,
+            "time_to_first_token": config.response_delay_ms as f64 / 1000.0,
+            "time_per_output_token": 0.01,
+            "finish_reason": {
+                "type": "stop",
+                "reason": "length"
+            }
+        });
+        if let Some(return_routed_experts) = payload.get("return_routed_experts").cloned() {
+            meta_info
+                .as_object_mut()
+                .expect("meta_info should be an object")
+                .insert(
+                    "echo_return_routed_experts".to_string(),
+                    return_routed_experts,
+                );
+        }
+
         (
             [("x-worker-id", worker_id)],
             Json(json!({
                 "text": "This is a mock response.",
-                "meta_info": {
-                    "prompt_tokens": 10,
-                    "completion_tokens": 5,
-                    "completion_tokens_wo_jump_forward": 5,
-                    "input_token_logprobs": null,
-                    "output_token_logprobs": null,
-                    "first_token_latency": config.response_delay_ms as f64 / 1000.0,
-                    "time_to_first_token": config.response_delay_ms as f64 / 1000.0,
-                    "time_per_output_token": 0.01,
-                    "finish_reason": {
-                        "type": "stop",
-                        "reason": "length"
-                    }
-                }
+                "meta_info": meta_info
             })),
         )
             .into_response()

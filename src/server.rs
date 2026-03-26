@@ -53,7 +53,7 @@ use crate::{
         worker_spec::{WorkerConfigRequest, WorkerUpdateRequest},
     },
     routers::{
-        conversations,
+        conversations, error,
         mesh::{
             get_app_config, get_cluster_status, get_global_rate_limit, get_global_rate_limit_stats,
             get_mesh_health, get_policy_state, get_policy_states, get_worker_state,
@@ -172,12 +172,21 @@ async fn get_model_info(State(state): State<Arc<AppState>>, req: Request) -> Res
 async fn generate(
     State(state): State<Arc<AppState>>,
     headers: http::HeaderMap,
-    Json(body): Json<GenerateRequest>,
+    Json(raw_body): Json<Value>,
 ) -> Response {
+    let body: GenerateRequest = match serde_json::from_value(raw_body.clone()) {
+        Ok(body) => body,
+        Err(err) => {
+            return error::bad_request(
+                "invalid_generate_request",
+                format!("Failed to deserialize /generate request: {}", err),
+            );
+        }
+    };
     let model_id = body.model.as_deref();
     state
         .router
-        .route_generate(Some(&headers), &body, model_id)
+        .route_generate_raw(Some(&headers), &body, &raw_body, model_id)
         .await
 }
 

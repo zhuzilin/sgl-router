@@ -9,6 +9,7 @@ use axum::{
 };
 use futures_util::{stream, StreamExt};
 use reqwest::Client;
+use serde_json::Value;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{debug, error};
 
@@ -198,9 +199,22 @@ impl Router {
         route: &'static str,
         model_id: Option<&str>,
     ) -> Response {
-        let start = Instant::now();
         let is_stream = typed_req.is_stream();
         let text = typed_req.extract_text_for_routing();
+        self.route_serializable_request(headers, typed_req, route, model_id, is_stream, &text)
+            .await
+    }
+
+    pub async fn route_serializable_request<T: serde::Serialize + Clone>(
+        &self,
+        headers: Option<&HeaderMap>,
+        request_body: &T,
+        route: &'static str,
+        model_id: Option<&str>,
+        is_stream: bool,
+        text: &str,
+    ) -> Response {
+        let start = Instant::now();
         let model = model_id.unwrap_or(UNKNOWN_MODEL_ID);
         let endpoint = route_to_endpoint(route);
 
@@ -219,7 +233,14 @@ impl Router {
             // operation per attempt
             |_: u32| async {
                 let res = self
-                    .route_typed_request_once(headers, typed_req, route, model_id, is_stream, &text)
+                    .route_typed_request_once(
+                        headers,
+                        request_body,
+                        route,
+                        model_id,
+                        is_stream,
+                        text,
+                    )
                     .await;
 
                 // Need to be outside `route_typed_request_once` because that function has multiple return paths
@@ -270,10 +291,10 @@ impl Router {
         response
     }
 
-    async fn route_typed_request_once<T: GenerationRequest + serde::Serialize + Clone>(
+    async fn route_typed_request_once<T: serde::Serialize + Clone>(
         &self,
         headers: Option<&HeaderMap>,
-        typed_req: &T,
+        request_body: &T,
         route: &'static str,
         model_id: Option<&str>,
         is_stream: bool,
@@ -310,7 +331,7 @@ impl Router {
         let response = self
             .send_typed_request(
                 headers,
-                typed_req,
+                request_body,
                 route,
                 worker.url(),
                 is_stream,
@@ -744,6 +765,25 @@ impl RouterTrait for Router {
     ) -> Response {
         self.route_typed_request(headers, body, "/generate", model_id)
             .await
+    }
+
+    async fn route_generate_raw(
+        &self,
+        headers: Option<&HeaderMap>,
+        body: &GenerateRequest,
+        raw_body: &Value,
+        model_id: Option<&str>,
+    ) -> Response {
+        let text = body.extract_text_for_routing();
+        self.route_serializable_request(
+            headers,
+            raw_body,
+            "/generate",
+            model_id,
+            body.stream,
+            &text,
+        )
+        .await
     }
 
     async fn route_chat(
