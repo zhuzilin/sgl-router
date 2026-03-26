@@ -6,6 +6,8 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  SCCACHE_GHA_ENABLED: "true"
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   check:
@@ -17,8 +19,21 @@ jobs:
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Install protobuf compiler and redis
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler redis-server
+
+      - name: Cache Cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-
 
       - name: Check compilation
         run: cargo check --all-targets --features vendored-openssl
@@ -37,8 +52,21 @@ jobs:
         with:
           components: clippy
 
+      - name: Setup sccache
+        uses: mozilla-actions/sccache-action@v0.0.7
+
       - name: Install protobuf compiler
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Cache Cargo registry & git
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: cargo-registry-
 
       - name: Clippy
         run: cargo clippy --all-targets --features vendored-openssl -- -D warnings
@@ -72,9 +100,10 @@ jobs:
         uses: PyO3/maturin-action@v1
         with:
           target: x86_64-unknown-linux-gnu
-          args: --release --out dist
+          args: --profile ci --out dist
           manylinux: 2_28
           working-directory: bindings/python
+          sccache: 'true'
           before-script-linux: |
             dnf install -y openssl-devel
             ARCH=$(uname -m)
@@ -85,6 +114,13 @@ jobs:
         run: |
           pip install bindings/python/dist/*.whl
           python -c "import sglang_router; print('Import OK')"
+
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-x86_64
+          path: bindings/python/dist/*.whl
+          retention-days: 1
 
   python-tests:
     name: Python tests
@@ -98,22 +134,15 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Build and install wheel
-        uses: PyO3/maturin-action@v1
+      - name: Download wheel artifact
+        uses: actions/download-artifact@v4
         with:
-          target: x86_64-unknown-linux-gnu
-          args: --release --out dist
-          manylinux: 2_28
-          working-directory: bindings/python
-          before-script-linux: |
-            dnf install -y openssl-devel
-            ARCH=$(uname -m)
-            curl -Lo /tmp/protoc.zip https://github.com/protocolbuffers/protobuf/releases/download/v28.3/protoc-28.3-linux-${ARCH}.zip
-            unzip -o /tmp/protoc.zip -d /usr/local bin/protoc && chmod +x /usr/local/bin/protoc
+          name: wheel-linux-x86_64
+          path: dist/
 
       - name: Install wheel and test deps
         run: |
-          pip install bindings/python/dist/*.whl
+          pip install dist/*.whl
           pip install pytest
 
       - name: Run Python tests
