@@ -475,6 +475,7 @@ impl PDRouter {
                 status,
                 None,
                 context.return_logprob,
+                false,
                 Some(decode_url),
                 Some(response_headers),
                 prefill,
@@ -623,39 +624,23 @@ impl PDRouter {
                         .await;
                 }
 
-                // Process prefill response
-                let prefill_body = if context.return_logprob {
-                    match self
-                        .process_prefill_response(
-                            prefill_result,
-                            prefill.url(),
-                            context.return_logprob,
-                        )
-                        .await
-                    {
-                        Ok((_, body)) => body,
-                        Err(error_response) => return error_response,
-                    }
-                } else {
-                    // Even if we don't need logprobs, we should check prefill status
-                    match self
-                        .process_prefill_response(prefill_result, prefill.url(), false)
-                        .await
-                    {
-                        Ok((_, body)) => body,
-                        Err(error_response) => return error_response,
-                    }
+                let merge_prefill_meta = context.route == "/generate";
+                let capture_prefill_body = context.return_logprob || merge_prefill_meta;
+                let prefill_body = match self
+                    .process_prefill_response(prefill_result, prefill.url(), capture_prefill_body)
+                    .await
+                {
+                    Ok((_, body)) => body,
+                    Err(error_response) => return error_response,
                 };
 
                 if context.is_stream {
                     // Streaming response
-                    let prefill_logprobs = if context.return_logprob {
+                    let prefill_meta = if capture_prefill_body {
                         prefill_body
                             .as_ref()
                             .and_then(|body| serde_json::from_slice::<Value>(body).ok())
-                            .and_then(|json| {
-                                json.pointer("/meta_info/input_token_logprobs").cloned()
-                            })
+                            .and_then(|json| json.get("meta_info").cloned())
                     } else {
                         None
                     };
@@ -665,8 +650,9 @@ impl PDRouter {
                     self.create_streaming_response(
                         res.bytes_stream(),
                         status,
-                        prefill_logprobs,
+                        prefill_meta,
                         context.return_logprob,
+                        merge_prefill_meta,
                         None,
                         Some(response_headers),
                         prefill,
@@ -674,35 +660,14 @@ impl PDRouter {
                     )
                 } else {
                     // Non-streaming response
-                    if context.return_logprob {
-                        self.process_non_streaming_response(
-                            res,
-                            status,
-                            context.return_logprob,
-                            prefill_body,
-                        )
-                        .await
-                    } else {
-                        // Direct passthrough when no logprobs needed
-                        let response_headers =
-                            header_utils::preserve_response_headers(res.headers());
-
-                        match res.bytes().await {
-                            Ok(decode_body) => {
-                                let mut response = Response::new(Body::from(decode_body));
-                                *response.status_mut() = status;
-                                *response.headers_mut() = response_headers;
-                                response
-                            }
-                            Err(e) => {
-                                error!("Failed to read decode response: {}", e);
-                                error::internal_error(
-                                    "read_response_failed",
-                                    "Failed to read response",
-                                )
-                            }
-                        }
-                    }
+                    self.process_non_streaming_response(
+                        res,
+                        status,
+                        context.return_logprob,
+                        merge_prefill_meta,
+                        prefill_body,
+                    )
+                    .await
                 }
             }
             Err(e) => {
@@ -858,8 +823,9 @@ impl PDRouter {
         &self,
         stream: impl futures_util::Stream<Item = Result<bytes::Bytes, reqwest::Error>> + Send + 'static,
         status: StatusCode,
-        prefill_logprobs: Option<Value>,
+        prefill_meta: Option<Value>,
         return_logprob: bool,
+        merge_prefill_meta: bool,
         decode_url: Option<String>,
         headers: Option<HeaderMap>,
         prefill: Arc<dyn Worker>,
@@ -876,9 +842,14 @@ impl PDRouter {
                     Ok(chunk) => {
                         let is_done = memmem::find(&chunk, b"data: [DONE]").is_some();
 
-                        let result = if return_logprob && prefill_logprobs.is_some() {
-                            Self::merge_streaming_logprobs(prefill_logprobs.clone(), &chunk)
-                                .unwrap_or(chunk)
+                        let result = if prefill_meta.is_some() {
+                            Self::merge_streaming_prefill_meta(
+                                prefill_meta.clone(),
+                                return_logprob,
+                                merge_prefill_meta,
+                                &chunk,
+                            )
+                            .unwrap_or(chunk)
                         } else {
                             chunk
                         };
@@ -926,8 +897,10 @@ impl PDRouter {
         res: reqwest::Response,
         status: StatusCode,
         return_logprob: bool,
+        merge_prefill_meta: bool,
         prefill_body: Option<bytes::Bytes>,
     ) -> Response {
+        let response_headers = header_utils::preserve_response_headers(res.headers());
         let response = res.bytes().await;
         let decode_body = match response {
             Ok(decode_body) => decode_body,
@@ -937,41 +910,69 @@ impl PDRouter {
             }
         };
 
-        if !return_logprob {
-            return (status, decode_body).into_response();
+        if !return_logprob && !merge_prefill_meta {
+            let mut response = Response::new(Body::from(decode_body));
+            *response.status_mut() = status;
+            *response.headers_mut() = response_headers;
+            return response;
         }
 
-        let Some(prefill_body) = prefill_body else {
-            return (status, decode_body).into_response();
+        let Ok(mut decode_json) = serde_json::from_slice::<Value>(&decode_body) else {
+            warn!("Failed to parse decode response for PD meta normalization");
+            let mut response = Response::new(Body::from(decode_body));
+            *response.status_mut() = status;
+            *response.headers_mut() = response_headers;
+            return response;
         };
 
-        // Merge logprobs from prefill and decode
-        let (Ok(prefill_json), Ok(mut decode_json)) = (
-            serde_json::from_slice::<Value>(&prefill_body),
-            serde_json::from_slice::<Value>(&decode_body),
-        ) else {
-            warn!("Failed to parse responses for logprob merging");
-            return (status, decode_body).into_response();
-        };
+        let prefill_json =
+            prefill_body
+                .as_ref()
+                .and_then(|body| match serde_json::from_slice::<Value>(body) {
+                    Ok(json) => Some(json),
+                    Err(_) => {
+                        warn!("Failed to parse prefill response for PD meta merging");
+                        None
+                    }
+                });
+        let prefill_meta = prefill_json.as_ref().and_then(|json| json.get("meta_info"));
 
-        Self::merge_logprobs_in_json(&prefill_json, &mut decode_json);
-
+        let changed = Self::merge_prefill_meta_in_json(
+            prefill_meta,
+            &mut decode_json,
+            return_logprob,
+            merge_prefill_meta,
+        );
+        if !changed {
+            let mut response = Response::new(Body::from(decode_body));
+            *response.status_mut() = status;
+            *response.headers_mut() = response_headers;
+            return response;
+        }
         // Return merged response
         match serde_json::to_vec(&decode_json) {
-            Ok(body) => (status, body).into_response(),
+            Ok(body) => {
+                let mut response = Response::new(Body::from(body));
+                *response.status_mut() = status;
+                *response.headers_mut() = response_headers;
+                response
+            }
             Err(e) => {
                 error!("Failed to serialize merged response: {}", e);
-                (status, decode_body).into_response()
+                let mut response = Response::new(Body::from(decode_body));
+                *response.status_mut() = status;
+                *response.headers_mut() = response_headers;
+                response
             }
         }
     }
 
-    // Helper to process prefill response and extract body if needed for logprobs
+    // Helper to process prefill response and extract body if needed for downstream merges
     async fn process_prefill_response(
         &self,
         prefill_result: Result<reqwest::Response, reqwest::Error>,
         prefill_url: &str,
-        return_logprob: bool,
+        capture_body: bool,
     ) -> Result<(StatusCode, Option<bytes::Bytes>), Response> {
         // Check prefill result first - it's critical for disaggregated mode
         let prefill_response = match prefill_result {
@@ -1040,12 +1041,11 @@ impl PDRouter {
             return Err(error_response);
         }
 
-        // Read prefill body if needed for logprob merging
-        let prefill_body = if return_logprob {
+        let prefill_body = if capture_body {
             match prefill_response.bytes().await {
                 Ok(body) => Some(body),
                 Err(e) => {
-                    warn!("Failed to read prefill response body for logprobs: {}", e);
+                    warn!("Failed to read prefill response body for merging: {}", e);
                     None
                 }
             }
@@ -1087,38 +1087,62 @@ impl PDRouter {
         request
     }
 
-    // Helper to merge logprobs from prefill and decode responses
-    // Optimized to avoid double cloning by taking ownership of decode array
-    fn merge_logprobs_in_json(prefill_json: &Value, decode_json: &mut Value) -> bool {
-        if let (Some(prefill_meta), Some(decode_meta)) = (
-            prefill_json.get("meta_info"),
-            decode_json.get_mut("meta_info"),
-        ) {
+    fn merge_prefill_meta_in_json(
+        prefill_meta: Option<&Value>,
+        decode_json: &mut Value,
+        return_logprob: bool,
+        merge_prefill_meta: bool,
+    ) -> bool {
+        let Some(decode_meta) = decode_json.get_mut("meta_info").and_then(Value::as_object_mut)
+        else {
+            return false;
+        };
+
+        let mut changed = false;
+
+        if return_logprob {
             if let (Some(prefill_logprobs), Some(decode_logprobs)) = (
-                prefill_meta.get("input_token_logprobs"),
+                prefill_meta.and_then(|meta| meta.get("input_token_logprobs")),
                 decode_meta.get_mut("input_token_logprobs"),
             ) {
                 if let Some(prefill_arr) = prefill_logprobs.as_array() {
-                    // Take ownership of decode array to avoid cloning it
                     let decode_arr = std::mem::take(decode_logprobs);
                     if let Value::Array(decode_vec) = decode_arr {
-                        // Pre-allocate merged array with exact capacity
-                        let mut merged = Vec::with_capacity(prefill_arr.len() + decode_vec.len());
+                        let mut merged =
+                            Vec::with_capacity(prefill_arr.len() + decode_vec.len());
                         merged.extend(prefill_arr.iter().cloned());
                         merged.extend(decode_vec);
-                        decode_meta["input_token_logprobs"] = Value::Array(merged);
-                        return true;
+                        *decode_logprobs = Value::Array(merged);
+                        changed = true;
+                    } else {
+                        *decode_logprobs = decode_arr;
                     }
                 }
             }
         }
-        false
+
+        if merge_prefill_meta {
+            if let Some(prefill_meta) = prefill_meta.and_then(Value::as_object) {
+                for (key, value) in prefill_meta {
+                    if Self::should_merge_prefill_meta_key(key) {
+                        decode_meta.insert(key.clone(), value.clone());
+                        changed = true;
+                    }
+                }
+            }
+        }
+
+        changed
     }
 
-    // Simple helper to merge logprobs in streaming responses
-    // Optimized to reduce allocations in the merge path
-    fn merge_streaming_logprobs(
-        prefill_logprobs: Option<Value>,
+    fn should_merge_prefill_meta_key(key: &str) -> bool {
+        key.starts_with("pd_prefill_") || key.starts_with("pd_transfer_")
+    }
+
+    fn merge_streaming_prefill_meta(
+        prefill_meta: Option<Value>,
+        return_logprob: bool,
+        merge_prefill_meta: bool,
         decode_chunk: &[u8],
     ) -> Result<bytes::Bytes, ()> {
         // Skip non-data chunks
@@ -1131,23 +1155,13 @@ impl PDRouter {
         let json_str = chunk_str.trim_start_matches("data: ").trim();
         let mut decode_json: Value = serde_json::from_str(json_str).map_err(|_| ())?;
 
-        // Merge prefill logprobs if available
-        if let Some(ref p_logprobs) = prefill_logprobs {
-            if let Some(meta) = decode_json.get_mut("meta_info") {
-                if let Some(d_logprobs) = meta.get_mut("input_token_logprobs") {
-                    if let Some(p_arr) = p_logprobs.as_array() {
-                        // Take ownership of decode array to avoid cloning it
-                        let decode_arr = std::mem::take(d_logprobs);
-                        if let Value::Array(d_vec) = decode_arr {
-                            // Pre-allocate merged array with exact capacity
-                            let mut merged = Vec::with_capacity(p_arr.len() + d_vec.len());
-                            merged.extend(p_arr.iter().cloned());
-                            merged.extend(d_vec);
-                            *d_logprobs = Value::Array(merged);
-                        }
-                    }
-                }
-            }
+        if !Self::merge_prefill_meta_in_json(
+            prefill_meta.as_ref(),
+            &mut decode_json,
+            return_logprob,
+            merge_prefill_meta,
+        ) {
+            return Err(());
         }
 
         // Re-serialize
@@ -1526,6 +1540,121 @@ mod tests {
         assert_eq!(decode_worker.load(), 0);
     }
 
+    #[test]
+    fn test_merge_prefill_pd_meta_whitelist_and_logprobs() {
+        let prefill_meta = json!({
+            "pd_prefill_bootstrap_queue_duration": 0.011,
+            "pd_prefill_bootstrap_duration": 0.012,
+            "pd_prefill_alloc_wait_duration": 0.013,
+            "pd_prefill_forward_duration": 0.125,
+            "pd_prefill_transfer_queue_duration": 0.025,
+            "pd_transfer_speed_gb_s": 42.0,
+            "pd_transfer_total_mb": 7.5,
+            "pd_prefill_retry_count": 2,
+            "request_received_ts": 100.0,
+            "queue_time": 99.0,
+            "finish_reason": {"type": "length"},
+            "input_token_logprobs": [[-0.3, 10]],
+        });
+        let mut decode_json = json!({
+            "text": "ok",
+            "meta_info": {
+                "queue_time": 0.1,
+                "finish_reason": {"type": "stop"},
+                "pd_decode_bootstrap_duration": 0.2,
+                "pd_decode_forward_duration": 0.75,
+                "input_token_logprobs": [[-0.2, 20]],
+            }
+        });
+
+        assert!(PDRouter::merge_prefill_meta_in_json(
+            Some(&prefill_meta),
+            &mut decode_json,
+            true,
+            true,
+        ));
+
+        let meta = &decode_json["meta_info"];
+        assert_eq!(meta["pd_prefill_bootstrap_queue_duration"], 0.011);
+        assert_eq!(meta["pd_prefill_bootstrap_duration"], 0.012);
+        assert_eq!(meta["pd_prefill_alloc_wait_duration"], 0.013);
+        assert_eq!(meta["pd_prefill_forward_duration"], 0.125);
+        assert_eq!(meta["pd_prefill_transfer_queue_duration"], 0.025);
+        assert_eq!(meta["pd_transfer_speed_gb_s"], 42.0);
+        assert_eq!(meta["pd_transfer_total_mb"], 7.5);
+        assert_eq!(meta["pd_prefill_retry_count"], 2);
+        assert_eq!(meta["pd_decode_bootstrap_duration"], 0.2);
+        assert_eq!(meta["pd_decode_forward_duration"], 0.75);
+        assert_eq!(meta["queue_time"], 0.1);
+        assert_eq!(meta["finish_reason"]["type"], "stop");
+        assert!(meta.get("request_received_ts").is_none());
+        assert_eq!(
+            meta["input_token_logprobs"],
+            json!([[-0.3, 10], [-0.2, 20]])
+        );
+    }
+
+    #[test]
+    fn test_merge_streaming_prefill_logprobs_only() {
+        let prefill_meta = json!({
+            "pd_prefill_forward_duration": 0.2,
+            "input_token_logprobs": [[-0.4, 1]],
+        });
+        let chunk = bytes::Bytes::from_static(
+            br#"data: {"text":"x","meta_info":{"completion_tokens":1,"input_token_logprobs":[[-0.1,2]]}}"#,
+        );
+        let merged = PDRouter::merge_streaming_prefill_meta(
+            Some(prefill_meta),
+            true,
+            false,
+            &chunk,
+        )
+        .expect("streaming chunk should merge");
+        let merged_str = std::str::from_utf8(&merged).unwrap();
+        let payload = merged_str.trim_start_matches("data: ").trim();
+        let parsed: Value = serde_json::from_str(payload).unwrap();
+
+        let meta = &parsed["meta_info"];
+        assert_eq!(meta["completion_tokens"], 1);
+        assert!(meta.get("pd_prefill_forward_duration").is_none());
+        assert!(meta.get("pd_decode_forward_duration").is_none());
+        assert_eq!(
+            meta["input_token_logprobs"],
+            json!([[-0.4, 1], [-0.1, 2]])
+        );
+    }
+
+    #[test]
+    fn test_merge_streaming_prefill_pd_meta() {
+        let prefill_meta = json!({
+            "pd_prefill_forward_duration": 0.2,
+            "pd_prefill_forward_entry_ts": 1234.5,
+            "pd_transfer_speed_gb_s": 42.0,
+            "pd_decode_forward_duration": 9.9,
+            "queue_time": 99.0,
+        });
+        let chunk = bytes::Bytes::from_static(
+            br#"data: {"text":"x","meta_info":{"completion_tokens":1,"pd_decode_forward_duration":0.7,"queue_time":0.1}}"#,
+        );
+        let merged = PDRouter::merge_streaming_prefill_meta(
+            Some(prefill_meta),
+            false,
+            true,
+            &chunk,
+        )
+        .expect("streaming chunk should merge");
+        let merged_str = std::str::from_utf8(&merged).unwrap();
+        let payload = merged_str.trim_start_matches("data: ").trim();
+        let parsed: Value = serde_json::from_str(payload).unwrap();
+
+        let meta = &parsed["meta_info"];
+        assert_eq!(meta["pd_prefill_forward_duration"], 0.2);
+        assert_eq!(meta["pd_prefill_forward_entry_ts"], 1234.5);
+        assert_eq!(meta["pd_transfer_speed_gb_s"], 42.0);
+        assert_eq!(meta["pd_decode_forward_duration"], 0.7);
+        assert_eq!(meta["queue_time"], 0.1);
+    }
+
     #[tokio::test]
     async fn test_streaming_load_tracking() {
         use futures_util::StreamExt;
@@ -1563,6 +1692,7 @@ mod tests {
                 stream.map(Ok),
                 StatusCode::OK,
                 None,
+                false,
                 false,
                 None,
                 None,
