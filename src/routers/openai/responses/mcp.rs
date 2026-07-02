@@ -478,10 +478,8 @@ pub(super) fn inject_mcp_metadata_streaming(
 
         let mcp_call_items =
             build_executed_mcp_call_items(&state.conversation_history, server_label);
-        let mut insert_pos = 1;
-        for item in mcp_call_items {
+        for (insert_pos, item) in (1..).zip(mcp_call_items) {
             output_array.insert(insert_pos, item);
-            insert_pos += 1;
         }
     } else if let Some(obj) = response.as_object_mut() {
         let mut output_items = Vec::new();
@@ -653,10 +651,8 @@ pub(super) async fn execute_tool_loop(
                         build_executed_mcp_call_items(&state.conversation_history, &server_label);
 
                     // Insert mcp_call items after mcp_list_tools using mutable position
-                    let mut insert_pos = 1;
-                    for item in mcp_call_items {
+                    for (insert_pos, item) in (1..).zip(mcp_call_items) {
                         output_array.insert(insert_pos, item);
-                        insert_pos += 1;
                     }
                 }
             }
