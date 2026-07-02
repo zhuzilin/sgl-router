@@ -4,7 +4,10 @@ use async_trait::async_trait;
 use axum::{
     body::Body,
     extract::Request,
-    http::{header::CONTENT_TYPE, HeaderMap, HeaderValue, StatusCode},
+    http::{
+        header::{CONTENT_LENGTH, CONTENT_TYPE},
+        HeaderMap, HeaderValue, StatusCode,
+    },
     response::{IntoResponse, Response},
 };
 use futures_util::StreamExt;
@@ -885,10 +888,22 @@ impl PDRouter {
         *response.status_mut() = status;
 
         let mut response_headers = headers.unwrap_or_default();
+        response_headers.remove(CONTENT_LENGTH);
         response_headers.insert(CONTENT_TYPE, HeaderValue::from_static("text/event-stream"));
         *response.headers_mut() = response_headers;
 
         AttachedBody::wrap_response(response, guards)
+    }
+
+    fn set_content_length(headers: &mut HeaderMap, body_len: usize) {
+        match HeaderValue::from_bytes(body_len.to_string().as_bytes()) {
+            Ok(value) => {
+                headers.insert(CONTENT_LENGTH, value);
+            }
+            Err(_) => {
+                headers.remove(CONTENT_LENGTH);
+            }
+        }
     }
 
     // Helper to process non-streaming decode response with logprob merging
@@ -952,6 +967,8 @@ impl PDRouter {
         // Return merged response
         match serde_json::to_vec(&decode_json) {
             Ok(body) => {
+                let mut response_headers = response_headers;
+                Self::set_content_length(&mut response_headers, body.len());
                 let mut response = Response::new(Body::from(body));
                 *response.status_mut() = status;
                 *response.headers_mut() = response_headers;
@@ -1596,6 +1613,16 @@ mod tests {
     }
 
     #[test]
+    fn test_set_content_length_after_body_merge() {
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("10"));
+
+        PDRouter::set_content_length(&mut headers, 42);
+
+        assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "42");
+    }
+
+    #[test]
     fn test_merge_streaming_prefill_logprobs_only() {
         let prefill_meta = json!({
             "pd_prefill_forward_duration": 0.2,
@@ -1643,6 +1670,46 @@ mod tests {
         assert_eq!(meta["pd_transfer_speed_gb_s"], 42.0);
         assert_eq!(meta["pd_decode_forward_duration"], 0.7);
         assert_eq!(meta["queue_time"], 0.1);
+    }
+
+    #[tokio::test]
+    async fn test_streaming_response_removes_content_length() {
+        let router = create_test_pd_router();
+        let prefill_worker: Arc<dyn Worker> = Arc::from(create_test_worker(
+            "http://prefill".to_string(),
+            WorkerType::Prefill {
+                bootstrap_port: None,
+            },
+            true,
+        ));
+        let decode_worker: Arc<dyn Worker> = Arc::from(create_test_worker(
+            "http://decode".to_string(),
+            WorkerType::Decode,
+            true,
+        ));
+
+        let (_tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let stream = UnboundedReceiverStream::new(rx);
+        let mut headers = HeaderMap::new();
+        headers.insert(CONTENT_LENGTH, HeaderValue::from_static("100"));
+
+        let response = router.create_streaming_response(
+            stream.map(Ok),
+            StatusCode::OK,
+            None,
+            false,
+            false,
+            None,
+            Some(headers),
+            prefill_worker,
+            decode_worker,
+        );
+
+        assert!(response.headers().get(CONTENT_LENGTH).is_none());
+        assert_eq!(
+            response.headers().get(CONTENT_TYPE).unwrap(),
+            "text/event-stream"
+        );
     }
 
     #[tokio::test]
