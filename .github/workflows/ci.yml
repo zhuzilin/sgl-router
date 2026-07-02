@@ -6,8 +6,6 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
-  SCCACHE_GHA_ENABLED: "true"
-  RUSTC_WRAPPER: "sccache"
 
 jobs:
   check:
@@ -20,7 +18,25 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Setup sccache
+        continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.7
+
+      - name: Configure optional sccache
+        run: |
+          if ! command -v sccache >/dev/null 2>&1; then
+            echo "sccache is unavailable; using rustc directly."
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          rustc_path="$(rustup which rustc)"
+          if SCCACHE_GHA_ENABLED=false sccache "$rustc_path" -vV >/dev/null 2>&1; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+          else
+            echo "sccache failed to start; using rustc directly."
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
 
       - name: Install protobuf compiler and redis
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler redis-server
@@ -53,7 +69,25 @@ jobs:
           components: clippy
 
       - name: Setup sccache
+        continue-on-error: true
         uses: mozilla-actions/sccache-action@v0.0.7
+
+      - name: Configure optional sccache
+        run: |
+          if ! command -v sccache >/dev/null 2>&1; then
+            echo "sccache is unavailable; using rustc directly."
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+            exit 0
+          fi
+
+          rustc_path="$(rustup which rustc)"
+          if SCCACHE_GHA_ENABLED=false sccache "$rustc_path" -vV >/dev/null 2>&1; then
+            echo "RUSTC_WRAPPER=sccache" >> "$GITHUB_ENV"
+            echo "SCCACHE_GHA_ENABLED=false" >> "$GITHUB_ENV"
+          else
+            echo "sccache failed to start; using rustc directly."
+            echo "RUSTC_WRAPPER=" >> "$GITHUB_ENV"
+          fi
 
       - name: Install protobuf compiler
         run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
@@ -103,7 +137,7 @@ jobs:
           args: --profile ci --out dist
           manylinux: 2_28
           working-directory: bindings/python
-          sccache: 'true'
+          sccache: 'false'
           before-script-linux: |
             dnf install -y openssl-devel
             ARCH=$(uname -m)

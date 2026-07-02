@@ -1093,7 +1093,9 @@ impl PDRouter {
         return_logprob: bool,
         merge_prefill_meta: bool,
     ) -> bool {
-        let Some(decode_meta) = decode_json.get_mut("meta_info").and_then(Value::as_object_mut)
+        let Some(decode_meta) = decode_json
+            .get_mut("meta_info")
+            .and_then(Value::as_object_mut)
         else {
             return false;
         };
@@ -1108,8 +1110,7 @@ impl PDRouter {
                 if let Some(prefill_arr) = prefill_logprobs.as_array() {
                     let decode_arr = std::mem::take(decode_logprobs);
                     if let Value::Array(decode_vec) = decode_arr {
-                        let mut merged =
-                            Vec::with_capacity(prefill_arr.len() + decode_vec.len());
+                        let mut merged = Vec::with_capacity(prefill_arr.len() + decode_vec.len());
                         merged.extend(prefill_arr.iter().cloned());
                         merged.extend(decode_vec);
                         *decode_logprobs = Value::Array(merged);
@@ -1603,13 +1604,9 @@ mod tests {
         let chunk = bytes::Bytes::from_static(
             br#"data: {"text":"x","meta_info":{"completion_tokens":1,"input_token_logprobs":[[-0.1,2]]}}"#,
         );
-        let merged = PDRouter::merge_streaming_prefill_meta(
-            Some(prefill_meta),
-            true,
-            false,
-            &chunk,
-        )
-        .expect("streaming chunk should merge");
+        let merged =
+            PDRouter::merge_streaming_prefill_meta(Some(prefill_meta), true, false, &chunk)
+                .expect("streaming chunk should merge");
         let merged_str = std::str::from_utf8(&merged).unwrap();
         let payload = merged_str.trim_start_matches("data: ").trim();
         let parsed: Value = serde_json::from_str(payload).unwrap();
@@ -1618,10 +1615,7 @@ mod tests {
         assert_eq!(meta["completion_tokens"], 1);
         assert!(meta.get("pd_prefill_forward_duration").is_none());
         assert!(meta.get("pd_decode_forward_duration").is_none());
-        assert_eq!(
-            meta["input_token_logprobs"],
-            json!([[-0.4, 1], [-0.1, 2]])
-        );
+        assert_eq!(meta["input_token_logprobs"], json!([[-0.4, 1], [-0.1, 2]]));
     }
 
     #[test]
@@ -1636,13 +1630,9 @@ mod tests {
         let chunk = bytes::Bytes::from_static(
             br#"data: {"text":"x","meta_info":{"completion_tokens":1,"pd_decode_forward_duration":0.7,"queue_time":0.1}}"#,
         );
-        let merged = PDRouter::merge_streaming_prefill_meta(
-            Some(prefill_meta),
-            false,
-            true,
-            &chunk,
-        )
-        .expect("streaming chunk should merge");
+        let merged =
+            PDRouter::merge_streaming_prefill_meta(Some(prefill_meta), false, true, &chunk)
+                .expect("streaming chunk should merge");
         let merged_str = std::str::from_utf8(&merged).unwrap();
         let payload = merged_str.trim_start_matches("data: ").trim();
         let parsed: Value = serde_json::from_str(payload).unwrap();
