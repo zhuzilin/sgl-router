@@ -10,6 +10,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use futures_util::StreamExt;
 use memchr::memmem;
 use reqwest::Client;
@@ -1139,6 +1140,27 @@ impl PDRouter {
             }
         }
 
+        if let Some(prefill_routed) = prefill_meta.and_then(|meta| meta.get("routed_experts")) {
+            if let Some(decode_routed) = decode_meta.get_mut("routed_experts") {
+                if Self::merge_base64_int32_meta_field(
+                    prefill_routed,
+                    decode_routed,
+                    "routed_experts",
+                ) {
+                    changed = true;
+                }
+            } else if decode_meta
+                .get("finish_reason")
+                .is_some_and(|value| !value.is_null())
+                && prefill_routed
+                    .as_str()
+                    .is_some_and(|value| !value.is_empty())
+            {
+                decode_meta.insert("routed_experts".to_string(), prefill_routed.clone());
+                changed = true;
+            }
+        }
+
         if merge_prefill_meta {
             if let Some(prefill_meta) = prefill_meta.and_then(Value::as_object) {
                 for (key, value) in prefill_meta {
@@ -1151,6 +1173,44 @@ impl PDRouter {
         }
 
         changed
+    }
+
+    fn merge_base64_int32_meta_field(
+        prefill_value: &Value,
+        decode_value: &mut Value,
+        field_name: &str,
+    ) -> bool {
+        let Some(prefill_str) = prefill_value.as_str() else {
+            return false;
+        };
+        if prefill_str.is_empty() {
+            return false;
+        }
+
+        let Some(decode_str) = decode_value.as_str() else {
+            warn!(
+                "Cannot merge PD {}: decode value is not a base64 string",
+                field_name
+            );
+            return false;
+        };
+        if decode_str.is_empty() {
+            *decode_value = Value::String(prefill_str.to_string());
+            return true;
+        }
+
+        let Ok(mut prefill_bytes) = BASE64_STANDARD.decode(prefill_str) else {
+            warn!("Cannot merge PD {}: invalid prefill base64", field_name);
+            return false;
+        };
+        let Ok(decode_bytes) = BASE64_STANDARD.decode(decode_str) else {
+            warn!("Cannot merge PD {}: invalid decode base64", field_name);
+            return false;
+        };
+
+        prefill_bytes.extend_from_slice(&decode_bytes);
+        *decode_value = Value::String(BASE64_STANDARD.encode(prefill_bytes));
+        true
     }
 
     fn should_merge_prefill_meta_key(key: &str) -> bool {
@@ -1486,6 +1546,20 @@ mod tests {
         Box::new(worker)
     }
 
+    fn b64_i32(values: &[i32]) -> String {
+        let bytes: Vec<u8> = values.iter().flat_map(|v| v.to_le_bytes()).collect();
+        BASE64_STANDARD.encode(bytes)
+    }
+
+    fn decode_b64_i32(value: &str) -> Vec<i32> {
+        BASE64_STANDARD
+            .decode(value)
+            .unwrap()
+            .chunks_exact(4)
+            .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
+            .collect()
+    }
+
     #[tokio::test]
     async fn test_select_healthy_prefill_worker() {
         let router = create_test_pd_router();
@@ -1560,6 +1634,8 @@ mod tests {
 
     #[test]
     fn test_merge_prefill_pd_meta_whitelist_and_logprobs() {
+        let prefill_routed = b64_i32(&[1, 2, 3, 4]);
+        let decode_routed = b64_i32(&[5, 6, 7, 8]);
         let prefill_meta = json!({
             "pd_prefill_bootstrap_queue_duration": 0.011,
             "pd_prefill_bootstrap_duration": 0.012,
@@ -1573,6 +1649,7 @@ mod tests {
             "queue_time": 99.0,
             "finish_reason": {"type": "length"},
             "input_token_logprobs": [[-0.3, 10]],
+            "routed_experts": prefill_routed,
         });
         let mut decode_json = json!({
             "text": "ok",
@@ -1582,6 +1659,7 @@ mod tests {
                 "pd_decode_bootstrap_duration": 0.2,
                 "pd_decode_forward_duration": 0.75,
                 "input_token_logprobs": [[-0.2, 20]],
+                "routed_experts": decode_routed,
             }
         });
 
@@ -1610,6 +1688,10 @@ mod tests {
             meta["input_token_logprobs"],
             json!([[-0.3, 10], [-0.2, 20]])
         );
+        assert_eq!(
+            decode_b64_i32(meta["routed_experts"].as_str().unwrap()),
+            vec![1, 2, 3, 4, 5, 6, 7, 8]
+        );
     }
 
     #[test]
@@ -1620,6 +1702,33 @@ mod tests {
         PDRouter::set_content_length(&mut headers, 42);
 
         assert_eq!(headers.get(CONTENT_LENGTH).unwrap(), "42");
+    }
+
+    #[test]
+    fn test_merge_prefill_routed_experts_when_decode_has_no_decode_rows() {
+        let prefill_routed = b64_i32(&[1, 2, 3, 4]);
+        let prefill_meta = json!({
+            "routed_experts": prefill_routed,
+        });
+        let mut decode_json = json!({
+            "text": "ok",
+            "meta_info": {
+                "finish_reason": {"type": "stop"},
+            }
+        });
+
+        assert!(PDRouter::merge_prefill_meta_in_json(
+            Some(&prefill_meta),
+            &mut decode_json,
+            false,
+            false,
+        ));
+
+        let meta = &decode_json["meta_info"];
+        assert_eq!(
+            decode_b64_i32(meta["routed_experts"].as_str().unwrap()),
+            vec![1, 2, 3, 4]
+        );
     }
 
     #[test]
@@ -1647,19 +1756,23 @@ mod tests {
 
     #[test]
     fn test_merge_streaming_prefill_pd_meta() {
+        let prefill_routed = b64_i32(&[11, 12]);
+        let decode_routed = b64_i32(&[21, 22]);
         let prefill_meta = json!({
             "pd_prefill_forward_duration": 0.2,
             "pd_prefill_forward_entry_ts": 1234.5,
             "pd_transfer_speed_gb_s": 42.0,
             "pd_decode_forward_duration": 9.9,
             "queue_time": 99.0,
+            "routed_experts": prefill_routed,
         });
-        let chunk = bytes::Bytes::from_static(
-            br#"data: {"text":"x","meta_info":{"completion_tokens":1,"pd_decode_forward_duration":0.7,"queue_time":0.1}}"#,
-        );
+        let chunk = bytes::Bytes::from(format!(
+            r#"data: {{"text":"x","meta_info":{{"completion_tokens":1,"pd_decode_forward_duration":0.7,"queue_time":0.1,"routed_experts":"{}"}}}}"#,
+            decode_routed
+        ));
         let merged =
-            PDRouter::merge_streaming_prefill_meta(Some(prefill_meta), false, true, &chunk)
-                .expect("streaming chunk should merge");
+            PDRouter::merge_streaming_prefill_meta(Some(prefill_meta), false, true, &chunk);
+        let merged = merged.expect("streaming chunk should merge");
         let merged_str = std::str::from_utf8(&merged).unwrap();
         let payload = merged_str.trim_start_matches("data: ").trim();
         let parsed: Value = serde_json::from_str(payload).unwrap();
@@ -1670,6 +1783,10 @@ mod tests {
         assert_eq!(meta["pd_transfer_speed_gb_s"], 42.0);
         assert_eq!(meta["pd_decode_forward_duration"], 0.7);
         assert_eq!(meta["queue_time"], 0.1);
+        assert_eq!(
+            decode_b64_i32(meta["routed_experts"].as_str().unwrap()),
+            vec![11, 12, 21, 22]
+        );
     }
 
     #[tokio::test]
